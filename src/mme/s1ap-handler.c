@@ -1825,8 +1825,8 @@ void s1ap_handle_handover_required(mme_enb_t *enb, ogs_s1ap_message_t *message)
     S1AP_HandoverRequired_t *HandoverRequired = NULL;
 
     S1AP_HandoverRequiredIEs_t *ie = NULL;
-    S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
     S1AP_MME_UE_S1AP_ID_t *MME_UE_S1AP_ID = NULL;
+    S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
     S1AP_HandoverType_t *HandoverType = NULL;
     S1AP_Cause_t *Cause = NULL;
     S1AP_TargetID_t *TargetID = NULL;
@@ -1851,11 +1851,11 @@ void s1ap_handle_handover_required(mme_enb_t *enb, ogs_s1ap_message_t *message)
     for (i = 0; i < HandoverRequired->protocolIEs.list.count; i++) {
         ie = HandoverRequired->protocolIEs.list.array[i];
         switch (ie->id) {
-        case S1AP_ProtocolIE_ID_id_eNB_UE_S1AP_ID:
-            ENB_UE_S1AP_ID = &ie->value.choice.ENB_UE_S1AP_ID;
-            break;
         case S1AP_ProtocolIE_ID_id_MME_UE_S1AP_ID:
             MME_UE_S1AP_ID = &ie->value.choice.MME_UE_S1AP_ID;
+            break;
+        case S1AP_ProtocolIE_ID_id_eNB_UE_S1AP_ID:
+            ENB_UE_S1AP_ID = &ie->value.choice.ENB_UE_S1AP_ID;
             break;
         case S1AP_ProtocolIE_ID_id_HandoverType:
             HandoverType = &ie->value.choice.HandoverType;
@@ -1878,7 +1878,64 @@ void s1ap_handle_handover_required(mme_enb_t *enb, ogs_s1ap_message_t *message)
     ogs_debug("    IP[%s] ENB_ID[%d]",
             OGS_ADDR(enb->sctp.addr, buf), enb->enb_id);
 
-    ogs_assert(TargetID);
+    if (!MME_UE_S1AP_ID) {
+        ogs_error("No MME_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
+
+    source_ue = enb_ue_find_by_mme_ue_s1ap_id(*MME_UE_S1AP_ID);
+    if (!source_ue) {
+        ogs_error("No eNB UE Context : MME_UE_S1AP_ID[%lld]",
+                (long long)*MME_UE_S1AP_ID);
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
+                S1AP_Cause_PR_radioNetwork,
+                S1AP_CauseRadioNetwork_unknown_mme_ue_s1ap_id);
+        return;
+    }
+
+    if (!ENB_UE_S1AP_ID) {
+        ogs_error("No ENB_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
+
+    ogs_debug("    Source : ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
+            source_ue->enb_ue_s1ap_id, source_ue->mme_ue_s1ap_id);
+
+    mme_ue = source_ue->mme_ue;
+    ogs_expect_or_return(mme_ue);
+
+    if (!HandoverType) {
+        ogs_error("No HandoverType");
+        s1ap_send_error_indication2(mme_ue,
+            S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
+
+    if (!Cause) {
+        ogs_error("No Cause");
+        s1ap_send_error_indication2(mme_ue,
+            S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
+
+    if (!TargetID) {
+        ogs_error("No TargetID");
+        s1ap_send_error_indication2(mme_ue,
+            S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
+
+    if (!Source_ToTarget_TransparentContainer) {
+        ogs_error("No Source_ToTarget_TransparentContainer");
+        s1ap_send_error_indication2(mme_ue,
+            S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
+
     switch (TargetID->present) {
     case S1AP_TargetID_PR_targeteNB_ID:
         ogs_s1ap_ENB_ID_to_uint32(
@@ -1887,41 +1944,31 @@ void s1ap_handle_handover_required(mme_enb_t *enb, ogs_s1ap_message_t *message)
         break;
     default:
         ogs_error("Not implemented(%d)", TargetID->present);
+        s1ap_send_handover_preparation_failure(source_ue,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
 
     target_enb = mme_enb_find_by_enb_id(target_enb_id);
     if (target_enb == NULL) {
-        ogs_warn("Handover required : cannot find target eNB-id[%d]",
-                target_enb_id);
+        ogs_error("Handover required : cannot find target eNB-id[0x%x]",
+                    target_enb_id);
+        s1ap_send_handover_preparation_failure(source_ue,
+                S1AP_Cause_PR_radioNetwork,
+                S1AP_CauseRadioNetwork_unknown_targetID);
         return;
     }
 
-    ogs_assert(ENB_UE_S1AP_ID);
-    ogs_assert(MME_UE_S1AP_ID);
-    source_ue = enb_ue_find_by_enb_ue_s1ap_id(enb, *ENB_UE_S1AP_ID);
-    ogs_assert(source_ue);
-    ogs_assert(source_ue->mme_ue_s1ap_id == *MME_UE_S1AP_ID);
-
-    ogs_debug("    Source : ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
-            source_ue->enb_ue_s1ap_id, source_ue->mme_ue_s1ap_id);
-
-    mme_ue = source_ue->mme_ue;
-    ogs_expect_or_return(mme_ue);
+    source_ue->handover_type = *HandoverType;
 
     if (SECURITY_CONTEXT_IS_VALID(mme_ue)) {
         mme_ue->nhcc++;
         ogs_kdf_nh_enb(mme_ue->kasme, mme_ue->nh, mme_ue->nh);
     } else {
-        ogs_assert(Cause);
-
-        s1ap_send_handover_preparation_failure(source_ue, Cause);
-
+        s1ap_send_handover_preparation_failure(source_ue,
+                S1AP_Cause_PR_nas, S1AP_CauseNas_authentication_failure);
         return;
     }
-
-    ogs_assert(HandoverType);
-    source_ue->handover_type = *HandoverType;
 
     s1ap_send_handover_request(
             source_ue, target_enb, HandoverType, Cause,
@@ -2115,7 +2162,8 @@ void s1ap_handle_handover_failure(mme_enb_t *enb, ogs_s1ap_message_t *message)
     ogs_debug("    Target : ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
             target_ue->enb_ue_s1ap_id, target_ue->mme_ue_s1ap_id);
 
-    s1ap_send_handover_preparation_failure(source_ue, Cause);
+    s1ap_send_handover_preparation_failure(
+            source_ue, Cause->present, Cause->choice.radioNetwork);
 
     s1ap_send_ue_context_release_command(
         target_ue, S1AP_Cause_PR_radioNetwork,
@@ -2165,22 +2213,52 @@ void s1ap_handle_handover_cancel(mme_enb_t *enb, ogs_s1ap_message_t *message)
             break;
         }
     }
+
     ogs_debug("    IP[%s] ENB_ID[%d]",
             OGS_ADDR(enb->sctp.addr, buf), enb->enb_id);
 
-    ogs_assert(MME_UE_S1AP_ID);
-    ogs_assert(ENB_UE_S1AP_ID);
-    ogs_assert(Cause);
+    if (!MME_UE_S1AP_ID) {
+        ogs_error("No MME_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
 
-    source_ue = enb_ue_find_by_enb_ue_s1ap_id(enb, *ENB_UE_S1AP_ID);
-    ogs_assert(source_ue);
-    ogs_assert(source_ue->mme_ue_s1ap_id == *MME_UE_S1AP_ID);
+    source_ue = enb_ue_find_by_mme_ue_s1ap_id(*MME_UE_S1AP_ID);
+    if (!source_ue) {
+        ogs_error("No eNB UE Context : MME_UE_S1AP_ID[%lld]",
+                (long long)*MME_UE_S1AP_ID);
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
+                S1AP_Cause_PR_radioNetwork,
+                S1AP_CauseRadioNetwork_unknown_mme_ue_s1ap_id);
+        return;
+    }
 
-    target_ue = source_ue->target_ue;
-    ogs_assert(target_ue);
+    if (!ENB_UE_S1AP_ID) {
+        ogs_error("No ENB_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
 
     ogs_debug("    Source : ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
             source_ue->enb_ue_s1ap_id, source_ue->mme_ue_s1ap_id);
+
+    if (!Cause) {
+        ogs_error("No Cause");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
+
+    target_ue = source_ue->target_ue;
+    if (!target_ue) {
+        ogs_error("No Target UE");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
+
     ogs_debug("    Target : ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
             target_ue->enb_ue_s1ap_id, target_ue->mme_ue_s1ap_id);
 
