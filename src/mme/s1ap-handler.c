@@ -446,6 +446,9 @@ void s1ap_handle_uplink_nas_transport(
         return;
     }
 
+    ogs_debug("    ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
+            enb_ue->enb_ue_s1ap_id, enb_ue->mme_ue_s1ap_id);
+
     if (!NAS_PDU) {
         ogs_error("No NAS_PDU");
         s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
@@ -516,6 +519,7 @@ void s1ap_handle_ue_capability_info_indication(
     S1AP_UECapabilityInfoIndication_t *UECapabilityInfoIndication = NULL;
 
     S1AP_UECapabilityInfoIndicationIEs_t *ie = NULL;
+    S1AP_MME_UE_S1AP_ID_t *MME_UE_S1AP_ID = NULL;
     S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
     S1AP_UERadioCapability_t *UERadioCapability = NULL;
 
@@ -536,6 +540,9 @@ void s1ap_handle_ue_capability_info_indication(
     for (i = 0; i < UECapabilityInfoIndication->protocolIEs.list.count; i++) {
         ie = UECapabilityInfoIndication->protocolIEs.list.array[i];
         switch (ie->id) {
+        case S1AP_ProtocolIE_ID_id_MME_UE_S1AP_ID:
+            MME_UE_S1AP_ID = &ie->value.choice.MME_UE_S1AP_ID;
+            break;
         case S1AP_ProtocolIE_ID_id_eNB_UE_S1AP_ID:
             ENB_UE_S1AP_ID = &ie->value.choice.ENB_UE_S1AP_ID;
             break;
@@ -550,9 +557,29 @@ void s1ap_handle_ue_capability_info_indication(
     ogs_debug("    IP[%s] ENB_ID[%d]",
             OGS_ADDR(enb->sctp.addr, buf), enb->enb_id);
 
-    ogs_assert(ENB_UE_S1AP_ID);
-    enb_ue = enb_ue_find_by_enb_ue_s1ap_id(enb, *ENB_UE_S1AP_ID);
-    ogs_assert(enb_ue);
+    if (!MME_UE_S1AP_ID) {
+        ogs_error("No MME_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
+
+    enb_ue = enb_ue_find_by_mme_ue_s1ap_id(*MME_UE_S1AP_ID);
+    if (!enb_ue) {
+        ogs_error("No eNB UE Context : MME_UE_S1AP_ID[%lld]",
+                (long long)*MME_UE_S1AP_ID);
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
+                S1AP_Cause_PR_radioNetwork,
+                S1AP_CauseRadioNetwork_unknown_mme_ue_s1ap_id);
+        return;
+    }
+
+    if (!ENB_UE_S1AP_ID) {
+        ogs_error("No ENB_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
+        return;
+    }
 
     ogs_debug("    ENB_UE_S1AP_ID[%d] MME_UE_S1AP_ID[%d]",
             enb_ue->enb_ue_s1ap_id, enb_ue->mme_ue_s1ap_id);
@@ -575,6 +602,7 @@ void s1ap_handle_initial_context_setup_response(
     S1AP_InitialContextSetupResponse_t *InitialContextSetupResponse = NULL;
 
     S1AP_InitialContextSetupResponseIEs_t *ie = NULL;
+    S1AP_MME_UE_S1AP_ID_t *MME_UE_S1AP_ID = NULL;
     S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
     S1AP_E_RABSetupListCtxtSURes_t *E_RABSetupListCtxtSURes = NULL;
 
@@ -596,6 +624,9 @@ void s1ap_handle_initial_context_setup_response(
     for (i = 0; i < InitialContextSetupResponse->protocolIEs.list.count; i++) {
         ie = InitialContextSetupResponse->protocolIEs.list.array[i];
         switch (ie->id) {
+        case S1AP_ProtocolIE_ID_id_MME_UE_S1AP_ID:
+            MME_UE_S1AP_ID = &ie->value.choice.MME_UE_S1AP_ID;
+            break;
         case S1AP_ProtocolIE_ID_id_eNB_UE_S1AP_ID:
             ENB_UE_S1AP_ID = &ie->value.choice.ENB_UE_S1AP_ID;
             break;
@@ -611,21 +642,27 @@ void s1ap_handle_initial_context_setup_response(
     ogs_debug("    IP[%s] ENB_ID[%d]",
             OGS_ADDR(enb->sctp.addr, buf), enb->enb_id);
 
-    if (!ENB_UE_S1AP_ID) {
-        ogs_error("No ENB_UE_S1AP_ID");
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+    if (!MME_UE_S1AP_ID) {
+        ogs_error("No MME_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
-    enb_ue = enb_ue_find_by_enb_ue_s1ap_id(enb, *ENB_UE_S1AP_ID);
+
+    enb_ue = enb_ue_find_by_mme_ue_s1ap_id(*MME_UE_S1AP_ID);
     if (!enb_ue) {
-        ogs_error("No eNB UE Context : ENB_UE_S1AP_ID[%lld]",
-                (long long)*ENB_UE_S1AP_ID);
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+        ogs_error("No eNB UE Context : MME_UE_S1AP_ID[%lld]",
+                (long long)*MME_UE_S1AP_ID);
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_radioNetwork,
-                S1AP_CauseRadioNetwork_unknown_enb_ue_s1ap_id);
+                S1AP_CauseRadioNetwork_unknown_mme_ue_s1ap_id);
+        return;
+    }
+
+    if (!ENB_UE_S1AP_ID) {
+        ogs_error("No ENB_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
 
@@ -713,6 +750,7 @@ void s1ap_handle_initial_context_setup_failure(
     S1AP_InitialContextSetupFailure_t *InitialContextSetupFailure = NULL;
 
     S1AP_InitialContextSetupFailureIEs_t *ie = NULL;
+    S1AP_MME_UE_S1AP_ID_t *MME_UE_S1AP_ID = NULL;
     S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
     S1AP_Cause_t *Cause = NULL;
 
@@ -734,6 +772,9 @@ void s1ap_handle_initial_context_setup_failure(
     for (i = 0; i < InitialContextSetupFailure->protocolIEs.list.count; i++) {
         ie = InitialContextSetupFailure->protocolIEs.list.array[i];
         switch (ie->id) {
+        case S1AP_ProtocolIE_ID_id_MME_UE_S1AP_ID:
+            MME_UE_S1AP_ID = &ie->value.choice.MME_UE_S1AP_ID;
+            break;
         case S1AP_ProtocolIE_ID_id_eNB_UE_S1AP_ID:
             ENB_UE_S1AP_ID = &ie->value.choice.ENB_UE_S1AP_ID;
             break;
@@ -748,21 +789,27 @@ void s1ap_handle_initial_context_setup_failure(
     ogs_debug("    IP[%s] ENB_ID[%d]",
             OGS_ADDR(enb->sctp.addr, buf), enb->enb_id);
 
-    if (!ENB_UE_S1AP_ID) {
-        ogs_error("No ENB_UE_S1AP_ID");
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+    if (!MME_UE_S1AP_ID) {
+        ogs_error("No MME_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
-    enb_ue = enb_ue_find_by_enb_ue_s1ap_id(enb, *ENB_UE_S1AP_ID);
+
+    enb_ue = enb_ue_find_by_mme_ue_s1ap_id(*MME_UE_S1AP_ID);
     if (!enb_ue) {
-        ogs_error("No eNB UE Context : ENB_UE_S1AP_ID[%lld]",
-                (long long)*ENB_UE_S1AP_ID);
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+        ogs_error("No eNB UE Context : MME_UE_S1AP_ID[%lld]",
+                (long long)*MME_UE_S1AP_ID);
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_radioNetwork,
-                S1AP_CauseRadioNetwork_unknown_enb_ue_s1ap_id);
+                S1AP_CauseRadioNetwork_unknown_mme_ue_s1ap_id);
+        return;
+    }
+
+    if (!ENB_UE_S1AP_ID) {
+        ogs_error("No ENB_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
 
@@ -802,6 +849,7 @@ void s1ap_handle_ue_context_modification_response(
     S1AP_UEContextModificationResponse_t *UEContextModificationResponse = NULL;
 
     S1AP_UEContextModificationResponseIEs_t *ie = NULL;
+    S1AP_MME_UE_S1AP_ID_t *MME_UE_S1AP_ID = NULL;
     S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
 
     mme_ue_t *mme_ue = NULL;
@@ -823,6 +871,9 @@ void s1ap_handle_ue_context_modification_response(
             i < UEContextModificationResponse->protocolIEs.list.count; i++) {
         ie = UEContextModificationResponse->protocolIEs.list.array[i];
         switch (ie->id) {
+        case S1AP_ProtocolIE_ID_id_MME_UE_S1AP_ID:
+            MME_UE_S1AP_ID = &ie->value.choice.MME_UE_S1AP_ID;
+            break;
         case S1AP_ProtocolIE_ID_id_eNB_UE_S1AP_ID:
             ENB_UE_S1AP_ID = &ie->value.choice.ENB_UE_S1AP_ID;
             break;
@@ -834,21 +885,27 @@ void s1ap_handle_ue_context_modification_response(
     ogs_debug("    IP[%s] ENB_ID[%d]",
             OGS_ADDR(enb->sctp.addr, buf), enb->enb_id);
 
-    if (!ENB_UE_S1AP_ID) {
-        ogs_error("No ENB_UE_S1AP_ID");
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+    if (!MME_UE_S1AP_ID) {
+        ogs_error("No MME_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
-    enb_ue = enb_ue_find_by_enb_ue_s1ap_id(enb, *ENB_UE_S1AP_ID);
+
+    enb_ue = enb_ue_find_by_mme_ue_s1ap_id(*MME_UE_S1AP_ID);
     if (!enb_ue) {
-        ogs_error("No eNB UE Context : ENB_UE_S1AP_ID[%lld]",
-                (long long)*ENB_UE_S1AP_ID);
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+        ogs_error("No eNB UE Context : MME_UE_S1AP_ID[%lld]",
+                (long long)*MME_UE_S1AP_ID);
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_radioNetwork,
-                S1AP_CauseRadioNetwork_unknown_enb_ue_s1ap_id);
+                S1AP_CauseRadioNetwork_unknown_mme_ue_s1ap_id);
+        return;
+    }
+
+    if (!ENB_UE_S1AP_ID) {
+        ogs_error("No ENB_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
 
@@ -871,6 +928,7 @@ void s1ap_handle_ue_context_modification_failure(
     S1AP_UEContextModificationFailure_t *UEContextModificationFailure = NULL;
 
     S1AP_UEContextModificationFailureIEs_t *ie = NULL;
+    S1AP_MME_UE_S1AP_ID_t *MME_UE_S1AP_ID = NULL;
     S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
     S1AP_Cause_t *Cause = NULL;
 
@@ -892,6 +950,9 @@ void s1ap_handle_ue_context_modification_failure(
     for (i = 0; i < UEContextModificationFailure->protocolIEs.list.count; i++) {
         ie = UEContextModificationFailure->protocolIEs.list.array[i];
         switch (ie->id) {
+        case S1AP_ProtocolIE_ID_id_MME_UE_S1AP_ID:
+            MME_UE_S1AP_ID = &ie->value.choice.MME_UE_S1AP_ID;
+            break;
         case S1AP_ProtocolIE_ID_id_eNB_UE_S1AP_ID:
             ENB_UE_S1AP_ID = &ie->value.choice.ENB_UE_S1AP_ID;
             break;
@@ -906,21 +967,27 @@ void s1ap_handle_ue_context_modification_failure(
     ogs_debug("    IP[%s] ENB_ID[%d]",
             OGS_ADDR(enb->sctp.addr, buf), enb->enb_id);
 
-    if (!ENB_UE_S1AP_ID) {
-        ogs_error("No ENB_UE_S1AP_ID");
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+    if (!MME_UE_S1AP_ID) {
+        ogs_error("No MME_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
-    enb_ue = enb_ue_find_by_enb_ue_s1ap_id(enb, *ENB_UE_S1AP_ID);
+
+    enb_ue = enb_ue_find_by_mme_ue_s1ap_id(*MME_UE_S1AP_ID);
     if (!enb_ue) {
-        ogs_error("No eNB UE Context : ENB_UE_S1AP_ID[%lld]",
-                (long long)*ENB_UE_S1AP_ID);
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+        ogs_error("No eNB UE Context : MME_UE_S1AP_ID[%lld]",
+                (long long)*MME_UE_S1AP_ID);
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_radioNetwork,
-                S1AP_CauseRadioNetwork_unknown_enb_ue_s1ap_id);
+                S1AP_CauseRadioNetwork_unknown_mme_ue_s1ap_id);
+        return;
+    }
+
+    if (!ENB_UE_S1AP_ID) {
+        ogs_error("No ENB_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
 
@@ -949,6 +1016,7 @@ void s1ap_handle_e_rab_setup_response(
     S1AP_E_RABSetupResponse_t *E_RABSetupResponse = NULL;
 
     S1AP_E_RABSetupResponseIEs_t *ie = NULL;
+    S1AP_MME_UE_S1AP_ID_t *MME_UE_S1AP_ID = NULL;
     S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
     S1AP_E_RABSetupListBearerSURes_t *E_RABSetupListBearerSURes = NULL;
 
@@ -969,6 +1037,9 @@ void s1ap_handle_e_rab_setup_response(
     for (i = 0; i < E_RABSetupResponse->protocolIEs.list.count; i++) {
         ie = E_RABSetupResponse->protocolIEs.list.array[i];
         switch (ie->id) {
+        case S1AP_ProtocolIE_ID_id_MME_UE_S1AP_ID:
+            MME_UE_S1AP_ID = &ie->value.choice.MME_UE_S1AP_ID;
+            break;
         case S1AP_ProtocolIE_ID_id_eNB_UE_S1AP_ID:
             ENB_UE_S1AP_ID = &ie->value.choice.ENB_UE_S1AP_ID;
             break;
@@ -984,21 +1055,27 @@ void s1ap_handle_e_rab_setup_response(
     ogs_debug("    IP[%s] ENB_ID[%d]",
             OGS_ADDR(enb->sctp.addr, buf), enb->enb_id);
 
-    if (!ENB_UE_S1AP_ID) {
-        ogs_error("No ENB_UE_S1AP_ID");
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+    if (!MME_UE_S1AP_ID) {
+        ogs_error("No MME_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
-    enb_ue = enb_ue_find_by_enb_ue_s1ap_id(enb, *ENB_UE_S1AP_ID);
+
+    enb_ue = enb_ue_find_by_mme_ue_s1ap_id(*MME_UE_S1AP_ID);
     if (!enb_ue) {
-        ogs_error("No eNB UE Context : ENB_UE_S1AP_ID[%lld]",
-                (long long)*ENB_UE_S1AP_ID);
-        s1ap_send_error_indication(enb,
-                NULL, ENB_UE_S1AP_ID,
+        ogs_error("No eNB UE Context : MME_UE_S1AP_ID[%lld]",
+                (long long)*MME_UE_S1AP_ID);
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, NULL,
                 S1AP_Cause_PR_radioNetwork,
-                S1AP_CauseRadioNetwork_unknown_enb_ue_s1ap_id);
+                S1AP_CauseRadioNetwork_unknown_mme_ue_s1ap_id);
+        return;
+    }
+
+    if (!ENB_UE_S1AP_ID) {
+        ogs_error("No ENB_UE_S1AP_ID");
+        s1ap_send_error_indication(enb, MME_UE_S1AP_ID, ENB_UE_S1AP_ID,
+                S1AP_Cause_PR_protocol, S1AP_CauseProtocol_semantic_error);
         return;
     }
 
@@ -1327,8 +1404,8 @@ void s1ap_handle_e_rab_modification_indication(
     S1AP_E_RABModificationIndication_t *E_RABModificationIndication = NULL;
 
     S1AP_E_RABModificationIndicationIEs_t *ie = NULL;
-    S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
     S1AP_MME_UE_S1AP_ID_t *MME_UE_S1AP_ID = NULL;
+    S1AP_ENB_UE_S1AP_ID_t *ENB_UE_S1AP_ID = NULL;
     S1AP_E_RABToBeModifiedListBearerModInd_t
         *E_RABToBeModifiedListBearerModInd = NULL;
 
